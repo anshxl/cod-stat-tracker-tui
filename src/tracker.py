@@ -43,31 +43,42 @@ def load_config(path: str) -> dict:
 
 
 class TrackerState:
-    """Manages kill counts and undo stack."""
+    """Manages kill counts, pull counts, and undo stack."""
 
     def __init__(self, num_players: int, player_names: list[str] | None = None):
         self.kills = [0] * num_players
-        self.undo_stack: list[int] = []
+        self.pulls = [0] * num_players
+        self.undo_stack: list[tuple[int, str]] = []
         self.last_action = ""
         self._names = player_names or [f"Player {i+1}" for i in range(num_players)]
 
     def increment(self, player_idx: int) -> None:
         self.kills[player_idx] += 1
-        self.undo_stack.append(player_idx)
+        self.undo_stack.append((player_idx, "kill"))
         name = self._names[player_idx]
-        self.last_action = f"+1 {name} (total: {self.kills[player_idx]})"
+        self.last_action = f"+1 kill {name} (total: {self.kills[player_idx]})"
+
+    def record_pull(self, player_idx: int) -> None:
+        self.pulls[player_idx] += 1
+        self.undo_stack.append((player_idx, "pull"))
+        name = self._names[player_idx]
+        self.last_action = f"+1 pull {name} (total: {self.pulls[player_idx]})"
 
     def undo(self) -> None:
         if not self.undo_stack:
             self.last_action = "Nothing to undo"
             return
-        player_idx = self.undo_stack.pop()
-        self.kills[player_idx] = max(0, self.kills[player_idx] - 1)
+        player_idx, action = self.undo_stack.pop()
         name = self._names[player_idx]
-        self.last_action = f"Undo {name} (total: {self.kills[player_idx]})"
+        if action == "kill":
+            self.kills[player_idx] = max(0, self.kills[player_idx] - 1)
+            self.last_action = f"Undo kill {name} (total: {self.kills[player_idx]})"
+        else:
+            self.pulls[player_idx] = max(0, self.pulls[player_idx] - 1)
+            self.last_action = f"Undo pull {name} (total: {self.pulls[player_idx]})"
 
 
-HEADER = ["date", "opponent", "map", "mode", "player", "operator", "op_kills"]
+HEADER = ["date", "opponent", "map", "mode", "player", "operator", "op_kills", "op_pulls"]
 
 
 def write_csv(path: str, session: dict) -> None:
@@ -86,6 +97,7 @@ def write_csv(path: str, session: dict) -> None:
                 session["players"][i],
                 session["operators"][i],
                 session["kills"][i],
+                session["pulls"][i],
             ])
 
 
@@ -153,8 +165,9 @@ def draw_screen(stdscr, session: dict, state: TrackerState) -> None:
         name = session["players"][i]
         op = session["operators"][i]
         kills = state.kills[i]
+        pulls = state.pulls[i]
         bar = "\u2588" * kills
-        line = f"[{i+1}] {name:<14} | {op:<16} | {bar} {kills}"
+        line = f"[{i+1}] {name:<14} | {op:<16} | {bar} {kills}k / {pulls}p"
         row = i + 3
         if row < h - 3:
             stdscr.addstr(row, 0, line[:w-1])
@@ -171,32 +184,37 @@ def draw_screen(stdscr, session: dict, state: TrackerState) -> None:
 
     # Legend
     if sep_row + 2 < h:
-        stdscr.addstr(sep_row + 2, 0, "[1-5] Add kill   [z] Undo   [q] End session"[:w-1])
+        stdscr.addstr(sep_row + 2, 0, "[1-5] Kill  [q/w/e/r/t] Pull  [z] Undo  [x] End"[:w-1])
 
     stdscr.refresh()
 
 
-def run_tracker(stdscr, session: dict) -> list[int]:
-    """Run the curses tracking loop. Returns final kill counts."""
+def run_tracker(stdscr, session: dict) -> tuple[list[int], list[int]]:
+    """Run the curses tracking loop. Returns (kills, pulls)."""
     curses.curs_set(0)
     stdscr.nodelay(False)
     stdscr.timeout(100)
 
     state = TrackerState(5, player_names=session["players"])
 
-    KEY_MAP = {
+    KILL_MAP = {
         ord("1"): 0, ord("2"): 1, ord("3"): 2, ord("4"): 3, ord("5"): 4,
+    }
+    PULL_MAP = {
+        ord("q"): 0, ord("w"): 1, ord("e"): 2, ord("r"): 3, ord("t"): 4,
     }
 
     while True:
         draw_screen(stdscr, session, state)
         key = stdscr.getch()
 
-        if key in KEY_MAP:
-            state.increment(KEY_MAP[key])
+        if key in KILL_MAP:
+            state.increment(KILL_MAP[key])
+        elif key in PULL_MAP:
+            state.record_pull(PULL_MAP[key])
         elif key == ord("z"):
             state.undo()
-        elif key in (ord("q"), 27):  # q or Esc
+        elif key in (ord("x"), 27):  # x or Esc
             # Confirmation prompt
             h, _ = stdscr.getmaxyx()
             stdscr.addstr(h - 1, 0, "End session and save? (y/n) ", curses.A_BOLD)
@@ -206,11 +224,11 @@ def run_tracker(stdscr, session: dict) -> list[int]:
             confirm = stdscr.getch()
             stdscr.timeout(100)
             if confirm in (ord("y"), ord("Y")):
-                return state.kills
+                return state.kills, state.pulls
             else:
                 state.last_action = "Cancelled — continuing"
 
-    return state.kills
+    return state.kills, state.pulls
 
 
 def main() -> None:
@@ -221,15 +239,16 @@ def main() -> None:
     config = load_config(config_path)
     session = get_session_metadata(config)
 
-    kills = curses.wrapper(run_tracker, session)
+    kills, pulls = curses.wrapper(run_tracker, session)
 
     session["date"] = date.today().isoformat()
     session["kills"] = kills
+    session["pulls"] = pulls
     write_csv(csv_path, session)
     print(f"\nSession saved to {csv_path}")
     print("Results:")
     for i in range(5):
-        print(f"  {session['players'][i]}: {kills[i]} kills ({session['operators'][i]})")
+        print(f"  {session['players'][i]}: {kills[i]} kills / {pulls[i]} pulls ({session['operators'][i]})")
 
 
 if __name__ == "__main__":
