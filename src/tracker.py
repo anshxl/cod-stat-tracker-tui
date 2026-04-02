@@ -207,3 +207,26 @@ def run_tracker(stdscr, session: dict) -> list[int]:
                 return state.kills
             else:
                 state.last_action = "Cancelled — continuing"
+
+
+def main() -> None:
+    """Entry point: load config, collect metadata, run tracker, save CSV."""
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "op_kills.csv")
+
+    config = load_config(config_path)
+    session = get_session_metadata(config)
+
+    kills = curses.wrapper(run_tracker, session)
+
+    session["date"] = date.today().isoformat()
+    session["kills"] = kills
+    write_csv(csv_path, session)
+    print(f"\nSession saved to {csv_path}")
+    print("Results:")
+    for i in range(5):
+        print(f"  {session['players'][i]}: {kills[i]} kills ({session['operators'][i]})")
+
+
+if __name__ == "__main__":
+    main()
