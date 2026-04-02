@@ -152,3 +152,50 @@ def test_increment_with_player_names():
     assert state.last_action == "+1 Bravo (total: 1)"
     state.undo()
     assert "Undo" in state.last_action and "Bravo" in state.last_action
+
+
+import csv
+from src.tracker import write_csv
+
+
+def test_write_csv_creates_file(tmp_path):
+    csv_path = str(tmp_path / "op_kills.csv")
+    session = {
+        "date": "2026-04-02",
+        "opponent": "OpTic",
+        "map": "Highrise",
+        "mode": "HP",
+        "players": ["P1", "P2", "P3", "P4", "P5"],
+        "operators": ["Op1", "Op2", "Op3", "Op4", "Op5"],
+        "kills": [3, 0, 1, 0, 7],
+    }
+    write_csv(csv_path, session)
+
+    with open(csv_path) as f:
+        reader = list(csv.reader(f))
+    assert reader[0] == ["date", "opponent", "map", "mode", "player", "operator", "op_kills"]
+    assert len(reader) == 6  # header + 5 rows
+    assert reader[1] == ["2026-04-02", "OpTic", "Highrise", "HP", "P1", "Op1", "3"]
+    assert reader[3] == ["2026-04-02", "OpTic", "Highrise", "HP", "P3", "Op3", "1"]
+
+
+def test_write_csv_appends(tmp_path):
+    csv_path = str(tmp_path / "op_kills.csv")
+    session = {
+        "date": "2026-04-02",
+        "opponent": "OpTic",
+        "map": "Highrise",
+        "mode": "HP",
+        "players": ["P1", "P2", "P3", "P4", "P5"],
+        "operators": ["Op1", "Op2", "Op3", "Op4", "Op5"],
+        "kills": [1, 1, 1, 1, 1],
+    }
+    write_csv(csv_path, session)
+    write_csv(csv_path, session)
+
+    with open(csv_path) as f:
+        reader = list(csv.reader(f))
+    assert len(reader) == 11  # 1 header + 5 + 5
+    assert reader[0] == ["date", "opponent", "map", "mode", "player", "operator", "op_kills"]
+    # No duplicate header
+    assert reader[6] != ["date", "opponent", "map", "mode", "player", "operator", "op_kills"]

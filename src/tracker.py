@@ -1,6 +1,8 @@
 """Op Kill Tracker — terminal-based operator skill kill counter."""
 
+import csv
 import json
+import os
 import sys
 
 
@@ -59,3 +61,25 @@ class TrackerState:
         self.kills[player_idx] = max(0, self.kills[player_idx] - 1)
         name = self._names[player_idx]
         self.last_action = f"Undo {name} (total: {self.kills[player_idx]})"
+
+
+HEADER = ["date", "opponent", "map", "mode", "player", "operator", "op_kills"]
+
+
+def write_csv(path: str, session: dict) -> None:
+    """Append session results to CSV. Creates file with header if it doesn't exist."""
+    file_exists = os.path.exists(path)
+    with open(path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(HEADER)
+        for i in range(5):
+            writer.writerow([
+                session["date"],
+                session["opponent"],
+                session["map"],
+                session["mode"],
+                session["players"][i],
+                session["operators"][i],
+                session["kills"][i],
+            ])
