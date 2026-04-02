@@ -92,3 +92,63 @@ def test_config_wrong_op_count(tmp_path):
     path.write_text(json.dumps(config))
     with pytest.raises(SystemExit, match="exactly 5"):
         load_config(str(path))
+
+
+from src.tracker import TrackerState
+
+
+def test_initial_state():
+    state = TrackerState(5)
+    assert state.kills == [0, 0, 0, 0, 0]
+    assert state.undo_stack == []
+    assert state.last_action == ""
+
+
+def test_increment():
+    state = TrackerState(5)
+    state.increment(0)
+    assert state.kills == [1, 0, 0, 0, 0]
+    assert state.undo_stack == [0]
+    assert state.last_action == "+1 Player 1 (total: 1)"
+
+
+def test_increment_multiple():
+    state = TrackerState(5)
+    state.increment(0)
+    state.increment(0)
+    state.increment(2)
+    assert state.kills == [2, 0, 1, 0, 0]
+    assert state.undo_stack == [0, 0, 2]
+
+
+def test_undo():
+    state = TrackerState(5)
+    state.increment(0)
+    state.increment(2)
+    state.undo()
+    assert state.kills == [1, 0, 0, 0, 0]
+    assert state.undo_stack == [0]
+    assert "Undo" in state.last_action
+
+
+def test_undo_empty_stack():
+    state = TrackerState(5)
+    state.undo()
+    assert state.kills == [0, 0, 0, 0, 0]
+    assert state.last_action == "Nothing to undo"
+
+
+def test_undo_no_negative():
+    state = TrackerState(5)
+    state.kills[0] = 0
+    state.undo_stack.append(0)  # corrupted state edge case
+    state.undo()
+    assert state.kills[0] == 0
+
+
+def test_increment_with_player_names():
+    state = TrackerState(5, player_names=["Alpha", "Bravo", "Charlie", "Delta", "Echo"])
+    state.increment(1)
+    assert state.last_action == "+1 Bravo (total: 1)"
+    state.undo()
+    assert "Undo" in state.last_action and "Bravo" in state.last_action

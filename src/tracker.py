@@ -34,3 +34,28 @@ def load_config(path: str) -> dict:
             _die(f"'op_defaults.{mode}' must have exactly 5 entries, got {len(op_defaults[mode])}")
 
     return config
+
+
+class TrackerState:
+    """Manages kill counts and undo stack."""
+
+    def __init__(self, num_players: int, player_names: list[str] | None = None):
+        self.kills = [0] * num_players
+        self.undo_stack: list[int] = []
+        self.last_action = ""
+        self._names = player_names or [f"Player {i+1}" for i in range(num_players)]
+
+    def increment(self, player_idx: int) -> None:
+        self.kills[player_idx] += 1
+        self.undo_stack.append(player_idx)
+        name = self._names[player_idx]
+        self.last_action = f"+1 {name} (total: {self.kills[player_idx]})"
+
+    def undo(self) -> None:
+        if not self.undo_stack:
+            self.last_action = "Nothing to undo"
+            return
+        player_idx = self.undo_stack.pop()
+        self.kills[player_idx] = max(0, self.kills[player_idx] - 1)
+        name = self._names[player_idx]
+        self.last_action = f"Undo {name} (total: {self.kills[player_idx]})"
