@@ -1,0 +1,7 @@
+{
+  "players": ["Shotzzy", "Simp", "Cellium", "Draz", "Dashy"],
+  "op_defaults": {
+    "HP": ["War Machine", "Tempest", "Annihilator", "Gravity Slam", "War Machine"],
+    "Control": ["War Machine", "Tempest", "Annihilator", "Gravity Slam", "Tempest"]
+  }
+}

@@ -1,0 +1,13 @@
+[project]
+name = "op-kill-tracker"
+version = "0.1.0"
+description = "Terminal-based operator skill kill tracker for CoD VOD review"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
