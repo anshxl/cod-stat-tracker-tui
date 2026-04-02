@@ -1,9 +1,11 @@
 """Op Kill Tracker — terminal-based operator skill kill counter."""
 
 import csv
+import curses
 import json
 import os
 import sys
+from datetime import date
 
 
 def _die(msg: str) -> None:
@@ -83,3 +85,52 @@ def write_csv(path: str, session: dict) -> None:
                 session["operators"][i],
                 session["kills"][i],
             ])
+
+
+def get_session_metadata(config: dict) -> dict:
+    """Collect session metadata via terminal prompts. Returns session dict."""
+    # Opponent
+    while True:
+        opponent = input("Opponent team name: ").strip()
+        if opponent:
+            break
+        print("Opponent name cannot be empty.")
+
+    # Map
+    while True:
+        map_name = input("Map name: ").strip()
+        if map_name:
+            break
+        print("Map name cannot be empty.")
+
+    # Mode
+    while True:
+        mode = input("Mode (HP/Control): ").strip().upper()
+        if mode in ("HP", "CONTROL"):
+            if mode == "CONTROL":
+                mode = "Control"
+            break
+        print("Invalid mode. Enter HP or Control.")
+
+    # Op assignments
+    players = config["players"]
+    operators = list(config["op_defaults"][mode])
+
+    print(f"\nDefault Op loadout for {mode}:")
+    for i, (player, op) in enumerate(zip(players, operators)):
+        print(f"  [{i+1}] {player}: {op}")
+
+    confirm = input("\nConfirm defaults? (y/n): ").strip().lower()
+    if confirm != "y":
+        for i, (player, op) in enumerate(zip(players, operators)):
+            override = input(f"  {player} [{op}]: ").strip()
+            if override:
+                operators[i] = override
+
+    return {
+        "opponent": opponent,
+        "map": map_name,
+        "mode": mode,
+        "players": players,
+        "operators": operators,
+    }
