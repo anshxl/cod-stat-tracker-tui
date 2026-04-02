@@ -134,3 +134,76 @@ def get_session_metadata(config: dict) -> dict:
         "players": players,
         "operators": operators,
     }
+
+
+def draw_screen(stdscr, session: dict, state: TrackerState) -> None:
+    """Render the tracking UI."""
+    stdscr.clear()
+    h, w = stdscr.getmaxyx()
+
+    # Header
+    header = f"Op Kill Tracker | vs {session['opponent']} | {session['map']} | {session['mode']}"
+    stdscr.addstr(0, 0, header[:w-1], curses.A_BOLD)
+    stdscr.addstr(1, 0, "\u2500" * min(len(header), w-1))
+
+    # Player rows
+    for i in range(5):
+        name = session["players"][i]
+        op = session["operators"][i]
+        kills = state.kills[i]
+        bar = "\u2588" * kills
+        line = f"[{i+1}] {name:<14} | {op:<16} | {bar} {kills}"
+        row = i + 3
+        if row < h - 3:
+            stdscr.addstr(row, 0, line[:w-1])
+
+    # Separator
+    sep_row = 9
+    if sep_row < h - 2:
+        stdscr.addstr(sep_row, 0, "\u2500" * min(50, w-1))
+
+    # Last action
+    if sep_row + 1 < h - 1:
+        action = state.last_action or "Ready"
+        stdscr.addstr(sep_row + 1, 0, f"Last action: {action}"[:w-1])
+
+    # Legend
+    if sep_row + 2 < h:
+        stdscr.addstr(sep_row + 2, 0, "[1-5] Add kill   [z] Undo   [q] End session"[:w-1])
+
+    stdscr.refresh()
+
+
+def run_tracker(stdscr, session: dict) -> list[int]:
+    """Run the curses tracking loop. Returns final kill counts."""
+    curses.curs_set(0)
+    stdscr.nodelay(False)
+    stdscr.timeout(100)
+
+    state = TrackerState(5, player_names=session["players"])
+
+    KEY_MAP = {
+        ord("1"): 0, ord("2"): 1, ord("3"): 2, ord("4"): 3, ord("5"): 4,
+    }
+
+    while True:
+        draw_screen(stdscr, session, state)
+        key = stdscr.getch()
+
+        if key in KEY_MAP:
+            state.increment(KEY_MAP[key])
+        elif key == ord("z"):
+            state.undo()
+        elif key in (ord("q"), 27):  # q or Esc
+            # Confirmation prompt
+            h, _ = stdscr.getmaxyx()
+            stdscr.addstr(h - 1, 0, "End session and save? (y/n) ", curses.A_BOLD)
+            stdscr.refresh()
+            stdscr.nodelay(False)
+            stdscr.timeout(-1)
+            confirm = stdscr.getch()
+            stdscr.timeout(100)
+            if confirm in (ord("y"), ord("Y")):
+                return state.kills
+            else:
+                state.last_action = "Cancelled — continuing"
