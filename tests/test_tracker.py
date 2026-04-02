@@ -28,14 +28,14 @@ def test_load_valid_config(valid_config):
 
 
 def test_config_file_missing(tmp_path):
-    with pytest.raises(SystemExit, match="not found"):
+    with pytest.raises(SystemExit):
         load_config(str(tmp_path / "nope.json"))
 
 
 def test_config_invalid_json(tmp_path):
     path = tmp_path / "config.json"
     path.write_text("{bad json")
-    with pytest.raises(SystemExit, match="Invalid JSON"):
+    with pytest.raises(SystemExit):
         load_config(str(path))
 
 
@@ -49,7 +49,7 @@ def test_config_wrong_player_count(tmp_path):
     }
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config))
-    with pytest.raises(SystemExit, match="exactly 5"):
+    with pytest.raises(SystemExit):
         load_config(str(path))
 
 
@@ -63,7 +63,7 @@ def test_config_empty_player_name(tmp_path):
     }
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config))
-    with pytest.raises(SystemExit, match="empty"):
+    with pytest.raises(SystemExit):
         load_config(str(path))
 
 
@@ -76,7 +76,7 @@ def test_config_missing_mode(tmp_path):
     }
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config))
-    with pytest.raises(SystemExit, match="Control"):
+    with pytest.raises(SystemExit):
         load_config(str(path))
 
 
@@ -90,7 +90,21 @@ def test_config_wrong_op_count(tmp_path):
     }
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config))
-    with pytest.raises(SystemExit, match="exactly 5"):
+    with pytest.raises(SystemExit):
+        load_config(str(path))
+
+
+def test_config_empty_op_name(tmp_path):
+    config = {
+        "players": ["P1", "P2", "P3", "P4", "P5"],
+        "op_defaults": {
+            "HP": ["Op1", "", "Op3", "Op4", "Op5"],
+            "Control": ["Op1", "Op2", "Op3", "Op4", "Op5"],
+        },
+    }
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config))
+    with pytest.raises(SystemExit):
         load_config(str(path))
 
 

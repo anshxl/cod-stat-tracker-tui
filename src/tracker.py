@@ -11,7 +11,7 @@ from datetime import date
 def _die(msg: str) -> None:
     """Print error and exit."""
     print(f"Error: {msg}", file=sys.stderr)
-    raise SystemExit(msg)
+    raise SystemExit(1)
 
 
 def load_config(path: str) -> dict:
@@ -36,6 +36,8 @@ def load_config(path: str) -> dict:
             _die(f"'op_defaults' missing required mode: {mode}")
         if len(op_defaults[mode]) != 5:
             _die(f"'op_defaults.{mode}' must have exactly 5 entries, got {len(op_defaults[mode])}")
+        if any(not op.strip() for op in op_defaults[mode]):
+            _die(f"Op names in '{mode}' cannot be empty")
 
     return config
 
@@ -207,6 +209,8 @@ def run_tracker(stdscr, session: dict) -> list[int]:
                 return state.kills
             else:
                 state.last_action = "Cancelled — continuing"
+
+    return state.kills
 
 
 def main() -> None:

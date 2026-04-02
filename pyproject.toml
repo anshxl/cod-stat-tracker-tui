@@ -10,5 +10,8 @@ dependencies = []
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[project.scripts]
+op-kill-tracker = "src.tracker:main"
+
 [dependency-groups]
 dev = ["pytest>=8.0"]
