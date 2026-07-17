@@ -1,7 +1,0 @@
-{
-  "players": ["Prevail", "Viper", "Abhiz", "Warden", "Skullguy"],
-  "op_defaults": {
-    "HP": ["Equalizer", "Tempest", "Death Machine", "Claw", "War Machine"],
-    "Control": ["Equalizer", "Tempest", "Annihilator", "Death Machine", "War Machine"]
-  }
-}

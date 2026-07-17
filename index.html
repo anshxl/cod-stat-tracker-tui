@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Op Kill Tracker</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #14161a; color: #e8eaed;
+    font: 16px/1.4 system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 24px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; color: #9aa0a6; letter-spacing: .5px; }
+  .clock {
+    display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; justify-content: center;
+  }
+  .clock label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #9aa0a6; }
+  .clock input {
+    width: 110px; padding: 8px 10px; font-size: 16px; text-align: center;
+    background: #1e2128; border: 1px solid #333842; border-radius: 8px; color: #e8eaed;
+  }
+  .dur { font-size: 13px; color: #9aa0a6; min-width: 120px; text-align: center; }
+  .dur b { color: #e8eaed; }
+  .players {
+    display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr));
+    gap: 12px; width: 100%; max-width: 900px;
+  }
+  .player {
+    background: #1e2128; border: 1px solid #333842; border-radius: 12px;
+    padding: 16px 8px; text-align: center; cursor: pointer; user-select: none;
+    transition: background .08s, transform .04s;
+  }
+  .player:hover { background: #262a33; }
+  .player:active { transform: scale(.97); }
+  .player .key { font-size: 11px; color: #6b7280; }
+  .player .name { font-size: 15px; font-weight: 600; margin: 2px 0 8px; }
+  .player .kills { font-size: 40px; font-weight: 700; line-height: 1; }
+  .player .kpm { font-size: 13px; color: #7cb342; margin-top: 6px; }
+  .player.flash { background: #2f6b34; }
+  .actions { display: flex; gap: 12px; }
+  .actions button {
+    padding: 8px 16px; font-size: 14px; background: #262a33; color: #e8eaed;
+    border: 1px solid #333842; border-radius: 8px; cursor: pointer;
+  }
+  .actions button:hover { background: #30353f; }
+  .hint { font-size: 12px; color: #6b7280; text-align: center; }
+  @media (max-width: 640px) { .players { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+  <h1>OP KILL TRACKER</h1>
+
+  <div class="clock">
+    <label>Match start<input id="start" placeholder="mm:ss"></label>
+    <label>Match end<input id="end" placeholder="mm:ss"></label>
+    <div class="dur" id="dur">duration —</div>
+  </div>
+
+  <div class="players" id="players"></div>
+
+  <div class="actions">
+    <button id="undo">Undo (⌫)</button>
+    <button id="reset">Reset match</button>
+  </div>
+  <div class="hint">Press 1–5 or click a player to add a kill. Backspace undoes the last kill.</div>
+
+<script>
+const PLAYERS = ["Prevail", "Viper", "Abhiz", "Warden", "Skullguy"];
+const KEY = "op-kill-tracker";
+
+const blank = () => ({ kills: PLAYERS.map(() => 0), history: [], start: "", end: "" });
+let state = load();
+
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if (s && Array.isArray(s.kills) && s.kills.length === PLAYERS.length) return s;
+  } catch {}
+  return blank();
+}
+function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+// Parse "mm:ss" or "h:mm:ss" (or bare seconds) -> seconds; null if unparseable.
+function toSeconds(str) {
+  if (!str || !str.trim()) return null;
+  const parts = str.trim().split(":").map(Number);
+  if (parts.some(isNaN)) return null;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+function durationMin() {
+  const a = toSeconds(state.start), b = toSeconds(state.end);
+  if (a == null || b == null || b <= a) return null;
+  return (b - a) / 60;
+}
+
+// --- render ---
+const playersEl = document.getElementById("players");
+const durEl = document.getElementById("dur");
+PLAYERS.forEach((name, i) => {
+  const el = document.createElement("div");
+  el.className = "player"; el.dataset.i = i;
+  el.innerHTML = `<div class="key">${i + 1}</div><div class="name">${name}</div>
+    <div class="kills">0</div><div class="kpm">—</div>`;
+  el.addEventListener("click", () => addKill(i));
+  playersEl.appendChild(el);
+});
+const cards = [...playersEl.children];
+
+function render() {
+  const dm = durationMin();
+  durEl.innerHTML = dm == null ? "duration —" : `duration <b>${dm.toFixed(1)} min</b>`;
+  cards.forEach((el, i) => {
+    el.querySelector(".kills").textContent = state.kills[i];
+    el.querySelector(".kpm").textContent =
+      dm == null ? "—" : (state.kills[i] / dm).toFixed(2) + " /min";
+  });
+  document.getElementById("start").value = state.start;
+  document.getElementById("end").value = state.end;
+}
+
+function addKill(i) {
+  state.kills[i]++; state.history.push(i);
+  save();
+  cards[i].classList.add("flash");
+  setTimeout(() => cards[i].classList.remove("flash"), 120);
+  render();
+}
+function undo() {
+  const i = state.history.pop();
+  if (i == null) return;
+  state.kills[i] = Math.max(0, state.kills[i] - 1);
+  save(); render();
+}
+function reset() {
+  if (!confirm("Clear kills and timestamps for this match?")) return;
+  state = blank(); save(); render();
+}
+
+// --- inputs ---
+document.getElementById("start").addEventListener("input", e => { state.start = e.target.value; save(); render(); });
+document.getElementById("end").addEventListener("input", e => { state.end = e.target.value; save(); render(); });
+document.getElementById("undo").addEventListener("click", undo);
+document.getElementById("reset").addEventListener("click", reset);
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return; // don't hijack timestamp typing
+  if (e.key >= "1" && e.key <= "5") addKill(+e.key - 1);
+  else if (e.key === "Backspace") { e.preventDefault(); undo(); }
+});
+
+render();
+</script>
+</body>
+</html>
