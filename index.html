@@ -130,8 +130,8 @@ function toSeconds(str) {
 }
 function footageMin(m) {
   const a = toSeconds(m.start), b = toSeconds(m.end);
-  if (a == null || b == null || b <= a) return null;
-  return (b - a) / 60;
+  if (a != null && b != null && b > a) return (b - a) / 60;      // live from timestamps
+  return typeof m.footageMin === "number" ? m.footageMin : null; // stored (e.g. CSV import)
 }
 
 // --- build player cards ---
@@ -179,7 +179,8 @@ function editMatch(idx) {
   if (store.current.kills.some(k => k > 0) &&
       !confirm("Reopen this match for editing? The current unsaved tally will be replaced.")) return;
   store.current = { date: m.date, week: m.week, opponent: m.opponent, map: m.map,
-    start: m.start || "", end: m.end || "", kills: m.kills.slice(), history: [] };
+    start: m.start || "", end: m.end || "", footageMin: m.footageMin ?? null,
+    kills: m.kills.slice(), history: [] };
   store.matches.splice(idx, 1);
   persist(); render(); syncFile();
   window.scrollTo(0, 0);
@@ -206,7 +207,8 @@ function saveMatch() {
   if (cur.kills.every(k => k === 0)) { alert("No kills recorded — nothing to save."); return; }
   store.matches.push({
     date: cur.date, week: cur.week, opponent: cur.opponent.trim().toUpperCase(),
-    map: cur.map.trim(), start: cur.start, end: cur.end, kills: cur.kills.slice(),
+    map: cur.map.trim(), start: cur.start, end: cur.end,
+    footageMin: footageMin(cur), kills: cur.kills.slice(),
   });
   // Keep date/week/opponent for the next map of the same series; clear the rest.
   store.current = { ...blankMatch(), date: cur.date, week: cur.week, opponent: cur.opponent };
@@ -244,6 +246,58 @@ function downloadCsv() {
   URL.revokeObjectURL(url);
 }
 
+// Parse CSV text into rows, honoring "" quoting.
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else if (c !== "\r") cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+// Reconstruct match objects from an ops_kills.csv (5 player rows -> 1 match).
+function matchesFromCsv(text) {
+  const rows = parseCsv(text).filter(r => r.length > 1);
+  if (!rows.length) return [];
+  const head = rows[0].map(h => h.trim());
+  const col = n => head.indexOf(n);
+  const ci = { date: col("Date"), week: col("Week"), opp: col("Opponent"),
+    map: col("Map"), player: col("Player"), kills: col("OpKills"), fm: col("FootageMin") };
+  if ([ci.date, ci.opp, ci.map, ci.player, ci.kills].some(x => x < 0)) return []; // not our format
+  const byKey = new Map();
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const date = (row[ci.date] || "").trim();
+    const opp = (row[ci.opp] || "").trim().toUpperCase();
+    const map = (row[ci.map] || "").trim();
+    const player = (row[ci.player] || "").trim();
+    if (!date || !player) continue;
+    const key = `${date}|${opp}|${map}`;
+    if (!byKey.has(key)) byKey.set(key, {
+      date, week: ci.week >= 0 ? (row[ci.week] || "").trim() : "",
+      opponent: opp, map, start: "", end: "",
+      footageMin: ci.fm >= 0 && (row[ci.fm] || "").trim() ? Number(row[ci.fm]) : null,
+      kills: PLAYERS.map(() => 0),
+    });
+    const pi = PLAYERS.indexOf(player);
+    if (pi >= 0) byKey.get(key).kills[pi] = Number(row[ci.kills]) || 0;
+  }
+  return [...byKey.values()];
+}
+const matchKey = m => `${m.date}|${m.opponent}|${m.map}`;
+// Union keyed by (date, opponent, map); existing (browser) wins on collision.
+function mergeMatches(existing, incoming) {
+  const have = new Set(existing.map(matchKey));
+  return existing.concat(incoming.filter(m => !have.has(matchKey(m))));
+}
+
 // --- linked-file sync (File System Access API) ---
 // Handle persists in IndexedDB; readwrite permission must be re-granted (one
 // click) each session because browsers require a user gesture to restore it.
@@ -273,6 +327,17 @@ async function writeFile() {
   await w.write(buildCsv());
   await w.close();
 }
+// Pull in rows the file has that the browser doesn't (e.g. hand-pasted history).
+// Only called on explicit reconnect, so browser deletes aren't resurrected.
+async function readAndMerge() {
+  try {
+    const external = matchesFromCsv(await (await fileHandle.getFile()).text());
+    const before = store.matches.length;
+    store.matches = mergeMatches(store.matches, external);
+    persist(); render();
+    return store.matches.length - before;
+  } catch { return 0; }
+}
 // Silent auto-sync: only writes if a file is linked AND permission already granted.
 async function syncFile() {
   try {
@@ -292,8 +357,9 @@ async function linkOrSync() {
       await idb("put", fileHandle);
     }
     if (!await ensurePermission()) { setStatus("permission denied"); return; }
+    const imported = await readAndMerge();
     await writeFile();
-    setStatus(`synced ✓ (${store.matches.length} matches)`);
+    setStatus(`synced ✓ (${store.matches.length} matches${imported ? `, +${imported} from file` : ""})`);
   } catch (e) { if (e.name !== "AbortError") setStatus("error: " + e.message); }
 }
 function setStatus(msg) {
