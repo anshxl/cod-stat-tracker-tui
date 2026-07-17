@@ -187,6 +187,7 @@ function undo() {
 function saveMatch() {
   const cur = store.current;
   if (!cur.opponent.trim() || !cur.map.trim()) { alert("Set opponent and map before saving."); return; }
+  if (footageMin(cur) == null) { alert("Set valid match start and end timestamps (end after start) before saving."); return; }
   if (cur.kills.every(k => k === 0)) { alert("No kills recorded — nothing to save."); return; }
   store.matches.push({
     date: cur.date, week: cur.week, opponent: cur.opponent.trim().toUpperCase(),
