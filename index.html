@@ -91,9 +91,11 @@
     <h2>Saved matches (<span id="count">0</span>)</h2>
     <div id="savedList"></div>
     <div class="foot">
+      <button id="linkCsv" class="primary">Link / sync CSV</button>
       <button id="download">Download ops_kills.csv</button>
       <button id="clearAll">Clear all saved</button>
     </div>
+    <div class="hint" id="syncStatus" style="text-align:left;margin-top:6px"></div>
   </div>
 
 <script>
@@ -158,16 +160,29 @@ function render() {
   $("savedList").innerHTML = "";
   store.matches.forEach((m, idx) => {
     const total = m.kills.reduce((a, b) => a + b, 0);
-    const fm = m.footageMin != null ? `, ${m.footageMin.toFixed(1)}m` : "";
+    const fmv = footageMin(m);
+    const fm = fmv != null ? `, ${fmv.toFixed(1)}m` : ", no timestamps";
     const row = document.createElement("div");
-    row.className = "row";
+    row.className = "row"; row.title = "Click to edit"; row.style.cursor = "pointer";
     row.innerHTML = `<span class="meta-txt">${m.date} vs ${m.opponent || "?"} — ${m.map || "?"} — ${total} kills${fm}</span>`;
+    row.addEventListener("click", () => editMatch(idx));
     const del = document.createElement("button");
     del.className = "del"; del.textContent = "×"; del.title = "Delete";
-    del.addEventListener("click", () => { store.matches.splice(idx, 1); persist(); render(); });
+    del.addEventListener("click", e => { e.stopPropagation(); store.matches.splice(idx, 1); persist(); render(); syncFile(); });
     row.appendChild(del);
     $("savedList").appendChild(row);
   });
+}
+
+function editMatch(idx) {
+  const m = store.matches[idx];
+  if (store.current.kills.some(k => k > 0) &&
+      !confirm("Reopen this match for editing? The current unsaved tally will be replaced.")) return;
+  store.current = { date: m.date, week: m.week, opponent: m.opponent, map: m.map,
+    start: m.start || "", end: m.end || "", kills: m.kills.slice(), history: [] };
+  store.matches.splice(idx, 1);
+  persist(); render(); syncFile();
+  window.scrollTo(0, 0);
 }
 
 function addKill(i) {
@@ -191,11 +206,11 @@ function saveMatch() {
   if (cur.kills.every(k => k === 0)) { alert("No kills recorded — nothing to save."); return; }
   store.matches.push({
     date: cur.date, week: cur.week, opponent: cur.opponent.trim().toUpperCase(),
-    map: cur.map.trim(), footageMin: footageMin(cur), kills: cur.kills.slice(),
+    map: cur.map.trim(), start: cur.start, end: cur.end, kills: cur.kills.slice(),
   });
   // Keep date/week/opponent for the next map of the same series; clear the rest.
   store.current = { ...blankMatch(), date: cur.date, week: cur.week, opponent: cur.opponent };
-  persist(); render();
+  persist(); render(); syncFile();
 }
 function reset() {
   if (!confirm("Clear the current match (kills + timestamps)?")) return;
@@ -204,15 +219,14 @@ function reset() {
   persist(); render();
 }
 
-// --- CSV export: mirrors tournament_players.csv key columns ---
+// --- CSV: mirrors tournament_players.csv key columns; full history each write ---
 const csvCell = v => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
-function downloadCsv() {
-  if (!store.matches.length) { alert("No saved matches to export."); return; }
+function buildCsv() {
   const header = ["Date", "Week", "Opponent", "Map", "Player", "OpKills", "FootageMin", "OpKillsPerMin"];
   const rows = [header];
   store.matches.forEach(m => {
+    const fm = footageMin(m);
     PLAYERS.forEach((name, i) => {
-      const fm = m.footageMin;
       rows.push([
         m.date, m.week, m.opponent, m.map, name, m.kills[i],
         fm != null ? fm.toFixed(2) : "",
@@ -220,11 +234,77 @@ function downloadCsv() {
       ]);
     });
   });
-  const csv = rows.map(r => r.map(csvCell).join(",")).join("\n") + "\n";
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  return rows.map(r => r.map(csvCell).join(",")).join("\n") + "\n";
+}
+function downloadCsv() {
+  if (!store.matches.length) { alert("No saved matches to export."); return; }
+  const url = URL.createObjectURL(new Blob([buildCsv()], { type: "text/csv" }));
   const a = document.createElement("a");
   a.href = url; a.download = "ops_kills.csv"; a.click();
   URL.revokeObjectURL(url);
+}
+
+// --- linked-file sync (File System Access API) ---
+// Handle persists in IndexedDB; readwrite permission must be re-granted (one
+// click) each session because browsers require a user gesture to restore it.
+const FS_OK = "showSaveFilePicker" in window;
+let fileHandle = null;
+
+function idb(method, val) {
+  return new Promise((res, rej) => {
+    const open = indexedDB.open("op-kill-tracker", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("kv");
+    open.onerror = () => rej(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction("kv", method === "get" ? "readonly" : "readwrite");
+      const req = method === "get" ? tx.objectStore("kv").get("csv") : tx.objectStore("kv").put(val, "csv");
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    };
+  });
+}
+async function ensurePermission() {
+  if (!fileHandle) return false;
+  if (await fileHandle.queryPermission({ mode: "readwrite" }) === "granted") return true;
+  return await fileHandle.requestPermission({ mode: "readwrite" }) === "granted";
+}
+async function writeFile() {
+  const w = await fileHandle.createWritable();
+  await w.write(buildCsv());
+  await w.close();
+}
+// Silent auto-sync: only writes if a file is linked AND permission already granted.
+async function syncFile() {
+  try {
+    if (!fileHandle || await fileHandle.queryPermission({ mode: "readwrite" }) !== "granted") return;
+    await writeFile();
+    setStatus(`synced ✓ (${store.matches.length} matches)`);
+  } catch (e) { setStatus("sync failed: " + e.message); }
+}
+// Button: link a file if none, else grant permission + write.
+async function linkOrSync() {
+  try {
+    if (!fileHandle) {
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: "ops_kills.csv",
+        types: [{ description: "CSV", accept: { "text/csv": [".csv"] } }],
+      });
+      await idb("put", fileHandle);
+    }
+    if (!await ensurePermission()) { setStatus("permission denied"); return; }
+    await writeFile();
+    setStatus(`synced ✓ (${store.matches.length} matches)`);
+  } catch (e) { if (e.name !== "AbortError") setStatus("error: " + e.message); }
+}
+function setStatus(msg) {
+  const linked = fileHandle ? `linked: ${fileHandle.name}` : "not linked";
+  $("syncStatus").textContent = msg ? `${linked} — ${msg}` : linked;
+}
+async function initSync() {
+  if (!FS_OK) { $("linkCsv").disabled = true; $("linkCsv").title = "Needs Chrome/Edge"; setStatus("file linking needs Chrome/Edge — use Download"); return; }
+  $("linkCsv").addEventListener("click", () => linkOrSync().then(render));
+  try { fileHandle = await idb("get") || null; } catch {}
+  setStatus(fileHandle ? "click to reconnect + sync" : "");
 }
 
 // --- wire up ---
@@ -236,9 +316,10 @@ $("reset").addEventListener("click", reset);
 $("download").addEventListener("click", downloadCsv);
 $("clearAll").addEventListener("click", () => {
   if (store.matches.length && confirm(`Delete all ${store.matches.length} saved matches?`)) {
-    store.matches = []; persist(); render();
+    store.matches = []; persist(); render(); syncFile();
   }
 });
+initSync();
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   if (e.key >= "1" && e.key <= "5") addKill(+e.key - 1);
